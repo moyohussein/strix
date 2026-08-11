@@ -816,6 +816,95 @@ def _matches_model_prefix(model_name: str, model_prefixes: tuple[str, ...]) -> b
     )
 
 
+def is_local_model(model_name: str) -> bool:
+    """Return whether a model appears to be a local model."""
+    name = _normalized_model_name(model_name)
+    if not name:
+        return False
+    
+    # Check for local model prefixes
+    local_prefixes = ("ollama/", "openai/local-", "localhost", "127.0.0.1", "0.0.0.0")
+    if any(name.startswith(prefix) for prefix in local_prefixes):
+        return True
+    
+    # Check if it's a known cloud provider
+    cloud_providers = ("openai/", "anthropic/", "claude", "gpt-", "vertex_ai/", "bedrock/", 
+                     "azure", "google/", "gemini/", "deepseek/", "dashscope/", "moonshot/")
+    if any(name.startswith(prefix) for prefix in cloud_providers):
+        return False
+    
+    # If it doesn't have a slash and isn't a known cloud model, might be local
+    if "/" not in name and not is_known_openai_bare_model(name):
+        return True
+    
+    return False
+
+
+def is_potentially_small_model(model_name: str) -> bool:
+    """Return whether a model might be too small for reliable Strix usage.
+    
+    This function tries to detect models that are likely <70B parameters,
+    which typically struggle with agentic tasks required by Strix.
+    """
+    name = _normalized_model_name(model_name)
+    if not name:
+        return False
+    
+    # Skip if it's a recommended or frontier model
+    if is_recommended_or_frontier_model(model_name):
+        return False
+    
+    # Known small model patterns
+    small_patterns = [
+        # Specific small models
+        "7b", "8b", "14b", "13b", "20b", "22b", "30b", "32b", "33b",
+        # Common small model names
+        "tiny", "small", "mini", "nano", "micro",
+        # Specific model families known to be small
+        "llama2-7b", "llama2-13b", "llama-7b", "llama-8b", "llama-13b",
+        "mistral-7b", "mistral-8b", "mixtral-8x7b", "mixtral-8x22b",
+        "qwen-7b", "qwen-14b", "qwen1.5-7b", "qwen1.5-14b",
+        "phi-2", "phi-3-mini", "phi-3-small", "phi-3-medium",
+        "gemma-7b", "gemma-2b", "gemma-9b",
+        # Quantization indicators for potentially small base models
+        "4bit", "8bit", "int4", "int8",
+    ]
+    
+    name_lower = name.lower()
+    if any(pattern in name_lower for pattern in small_patterns):
+        return True
+    
+    return False
+
+
+def get_model_warning(model_name: str) -> str | None:
+    """Return a warning message if the model might have issues with Strix."""
+    if not model_name:
+        return None
+    
+    name = _normalized_model_name(model_name)
+    if not name:
+        return None
+    
+    # Check for local models that might be small
+    if is_local_model(model_name) and is_potentially_small_model(model_name):
+        return (
+            "Small local models (<70B parameters) often struggle with Strix's agentic tasks. "
+            "For best results, use models with 70B+ parameters like 'ollama/qwen3:70b' or 'ollama/llama4:70b'. "
+            "You can test your model with: python scripts/test_local_model_tool_call.py"
+        )
+    
+    # Check for potential tool call issues with known model families
+    if is_local_model(model_name):
+        return (
+            "Local models require proper inference server configuration. "
+            "Ensure your server supports structured tool calls and has sufficient context window (≥16k tokens). "
+            "See docs: https://docs.strix.ai/llm-providers/local"
+        )
+    
+    return None
+
+
 def _model_name_candidates(model_name: str) -> tuple[str, ...]:
     if "." not in model_name:
         return (model_name,)

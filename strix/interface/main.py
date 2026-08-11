@@ -134,6 +134,7 @@ async def warm_up_llm(show_model_warning: bool = True) -> None:
         RECOMMENDED_MODEL_NAMES,
         StrixProvider,
         configure_sdk_model_defaults,
+        get_model_warning,
         is_known_openai_bare_model,
         is_recommended_or_frontier_model,
     )
@@ -179,7 +180,25 @@ async def warm_up_llm(show_model_warning: bool = True) -> None:
             )
             sys.exit(1)
 
-        if show_model_warning and raw_model and not is_recommended_or_frontier_model(raw_model):
+        # Check for specific model warnings (e.g., small local models)
+        model_warning = get_model_warning(raw_model) if show_model_warning and raw_model else None
+        
+        if model_warning:
+            warn_text = Text()
+            warn_text.append("LOCAL MODEL WARNING", style="bold yellow")
+            warn_text.append("\n\n", style="white")
+            warn_text.append(model_warning, style="white")
+            warn_text.append("\n\n", style="white")
+            console.print(
+                Panel(
+                    warn_text,
+                    title="[bold white]STRIX",
+                    title_align="left",
+                    border_style="yellow",
+                    padding=(1, 2),
+                ),
+            )
+        elif show_model_warning and raw_model and not is_recommended_or_frontier_model(raw_model):
             warn_text = Text()
             warn_text.append("MODEL QUALITY WARNING", style="bold yellow")
             warn_text.append("\n\n", style="white")

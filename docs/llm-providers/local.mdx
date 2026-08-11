@@ -20,40 +20,246 @@ Running Strix with local models allows for completely offline, privacy-first sec
 For critical assessments, we strongly recommend using state-of-the-art cloud models like **Claude 4.5 Sonnet** or **GPT-5**. Use local models only when privacy is the absolute priority.
 </Warning>
 
+## Model Size Recommendations
+
+Strix's agentic pentesting workflows require specific capabilities that vary significantly by model size and quantization:
+
+| Model Size | Tool Use Reliability | Multi-step Reasoning | Strix Compatibility | Recommendation |
+|------------|---------------------|---------------------|---------------------|----------------|
+| **< 14B** | ❌ Very poor | ❌ Cannot handle | ❌ Will not work | Avoid for Strix |
+| **14-30B** | ⚠️ Unreliable | ⚠️ Struggles | ⚠️ Testing only | Not recommended |
+| **30-70B** | ⚠️ Possible | ⚠️ Limited | ⚠️ Limited scans | Use with caution |
+| **70B+** | ✅ Good | ✅ Capable | ✅ Recommended | Best local option |
+
+**Key insight**: Parameter count matters more than quantization. A 70B 4-bit model will generally outperform a 30B 8-bit model for agentic tasks, because the reasoning capability (not just the precision) determines whether the model can reliably produce structured tool calls.
+
+## Quick Start Guide
+
+Before investing time in setup, verify your model can work with Strix:
+
+1. **Test your model first** using our verification script:
+   ```bash
+   python scripts/test_local_model_tool_call.py --model "your-model" --api-base "http://localhost:11434"
+   ```
+
+2. **Start small** with a quick scan:
+   ```bash
+   export STRIX_LLM="ollama/your-model"
+   export LLM_API_BASE="http://localhost:11434"
+   export STRIX_REASONING_EFFORT="medium"
+   strix -n --target https://example.com --scan-mode quick --max-turns 50
+   ```
+
+3. **Monitor** for tool call errors or malformed responses in the logs.
+
+## Recommended Models by Size
+
+## Recommended Models by Provider
+
+### 70B+ Parameter Models (Recommended)
+
+These models have demonstrated the best results with Strix's agentic workflows:
+
+**Ollama:**
+- `qwen3:70b` - Excellent tool use, good reasoning
+- `llama4:70b` - Strong performance across all tasks
+- `deepseek-v3:32b` - Great for complex multi-step workflows
+- `qwen3-vl:70b` - Vision-capable for web interface analysis
+
+**Command to pull:**
+```bash
+ollama pull qwen3:70b
+```
+
+### 30-70B Parameter Models (Conditional)
+
+These may work but require careful configuration and reduced scan complexity:
+
+- `qwen3:32b` - Acceptable with perfect configuration
+- `llama3.2:11b` - Borderline, use only for testing
+- `deepseek-v3` - 32B variant works with tuning
+
+### Models to Avoid
+
+- **<14B parameters**: Cannot reliably produce structured tool calls
+- **4-bit quantized <30B**: Precision loss compounds reasoning limitations
+- **Models without tool-call templates**: Will never work regardless of size
+
 ## Ollama
 
 [Ollama](https://ollama.ai) is the easiest way to run local models on macOS, Linux, and Windows.
 
 ### Setup
 
-1. Install Ollama from [ollama.ai](https://ollama.ai)
-2. Pull a high-performance model:
+1. **Install Ollama** from [ollama.ai](https://ollama.ai)
+2. **Pull a recommended model**:
    ```bash
-   ollama pull qwen3-vl
+   # For best results
+   ollama pull qwen3:70b
+   
+   # For testing (less reliable)
+   ollama pull qwen3:32b
    ```
-3. Configure Strix:
+3. **Configure Strix**:
    ```bash
-   export STRIX_LLM="ollama/qwen3-vl"
+   export STRIX_LLM="ollama/qwen3:70b"
    export LLM_API_BASE="http://localhost:11434"
    ```
 
-### Recommended Models
+### Critical Ollama Configuration
 
-We recommend these models for the best balance of reasoning and tool use:
+For Strix to work, you **must** configure Ollama correctly:
 
-**Recommended models:**
-- **Qwen3 VL** (`ollama pull qwen3-vl`)
-- **DeepSeek V3.1** (`ollama pull deepseek-v3.1`)
-- **Devstral 2** (`ollama pull devstral-2`)
+```bash
+# Required: Increase context window (default 8k is too small)
+export OLLAMA_NUM_CTX=32768
+
+# Required: Disable thinking mode for reasoning models
+export OLLAMA_ORIGINS="*"  # Allow all origins for API access
+
+# Optional: Run with specific parameters
+ollama run qwen3:70b --num-ctx 32768 --temperature 0.2
+```
+
+**For reasoning models (qwen3, llama4)**: The thinking mode must be disabled. Either:
+- Use non-thinking model variants when available
+- Create a custom Modelfile with `think: false`
+- Set `OLLAMA_THINKING=false` (if supported by your version)
+
+### Recommended Ollama Models
+
+| Model | Size | Tool Use | Reasoning | Strix Rating |
+|-------|------|----------|-----------|--------------|
+| `qwen3:70b` | 70B | ✅ Excellent | ✅ Strong | ⭐⭐⭐⭐⭐ |
+| `llama4:70b` | 70B | ✅ Excellent | ✅ Strong | ⭐⭐⭐⭐⭐ |
+| `deepseek-v3:32b` | 32B | ✅ Good | ✅ Good | ⭐⭐⭐⭐ |
+| `qwen3:32b` | 32B | ⚠️ Possible | ⚠️ Limited | ⭐⭐⭐ |
+| `llama3.2:11b` | 11B | ⚠️ Unreliable | ⚠️ Basic | ⭐⭐ |
+
+**Note**: Ollama automatically quantizes models to 4-bit. This is fine for 70B+ models but problematic for smaller ones.
+
+### Ollama Troubleshooting
+
+**Problem: "tools param requires --jinja flag"**
+```bash
+# Modern Ollama requires Jinja templating for tool support
+# This is automatically enabled in recent versions
+ollama run qwen3:70b  # Should work with current Ollama
+```
+
+**Problem: Tool calls returned as text**
+```bash
+# The model is in thinking mode - disable it
+# Create a Modelfile:
+FROM qwen3:70b
+PARAMETER think false
+# Then rebuild: ollama create my-qwen3 -f Modelfile
+```
+
+**Problem: Context window truncation**
+```bash
+# Increase context window
+export OLLAMA_NUM_CTX=32768
+# Or run with: ollama run model --num-ctx 32768
+```
+
+## llama.cpp
+
+[llama.cpp](https://github.com/ggerganov/llama.cpp) offers the most control over model inference with minimal overhead.
+
+### Setup
+
+1. **Build and run llama-server**:
+   ```bash
+   # Build with tool support
+   make LLAMA_CUBLAS=1  # For CUDA
+   
+   # Run server with critical flags
+   ./llama-server \
+     --model qwen3-70b-4bit.gguf \
+     --jinja \                # REQUIRED for tool support
+     --ctx-size 32768 \       # REQUIRED for Strix context
+     --temp 0.2 \             # Recommended for tool reliability
+     --port 8080
+   ```
+
+2. **Configure Strix**:
+   ```bash
+   export STRIX_LLM="openai/qwen3-70b"
+   export LLM_API_BASE="http://localhost:8080/v1"
+   ```
+
+### Critical llama.cpp Configuration
+
+**Required flags:**
+- `--jinja`: Enables Jinja templating for tool call parsing (non-negotiable)
+- `--ctx-size 32768` or higher: Strix sends large prompts with many tool schemas
+
+**Recommended flags:**
+- `--temp 0.2-0.6`: Low temperature reduces malformed tool calls
+- `--reasoning-format` or `-rea off`: Disable reasoning tokens if they break parsing
+- `--threads` / `--n-gl 0`: Optimize for your hardware
+
+### Finding Compatible GGUF Files
+
+Use models from [Hugging Face](https://huggingface.co/models?library=gguf) that:
+- Are 70B+ parameters for reliable tool use
+- Have Q4_K_M or higher quantization for 70B models
+- Include a chat template that supports tools
+
+**Recommended sources:**
+- [TheBloke's Qwen3-70B-GGUF](https://huggingface.co/TheBloke/Qwen3-70B-GGUF)
+- [Llama-4-70B-Instruct-GGUF](https://huggingface.co/collections/thebloke/llama-4-70b-gguf-6637ba77505c49d4b1523022)
+
+## vLLM
+
+[vLLM](https://github.com/vllm-project/vllm) provides high-performance inference with support for various tool call parsers.
+
+### Setup
+
+```bash
+# Install vLLM with CUDA
+pip install vllm
+
+# Start server with tool support
+vllm serve qwen3-70b \
+  --enable-auto-tool-choice \      # REQUIRED
+  --tool-call-parser qwen3_xml \   # Match to model family
+  --ctx-size 32768 \                # REQUIRED for Strix
+  --temperature 0.2 \              # Recommended
+  --max-model-len 32768 \
+  --port 8000
+```
+
+**Tool call parser options:**
+- `qwen3_xml` for Qwen3 models
+- `llama3_json` for Llama3/4 models  
+- `hermes` for Nous-Hermes models
+
+### Configure Strix
+```bash
+export STRIX_LLM="openai/qwen3-70b"
+export LLM_API_BASE="http://localhost:8000/v1"
+```
 
 ## LM Studio / OpenAI Compatible
 
-If you use LM Studio, vLLM, or other runners:
+[LM Studio](https://lmstudio.ai) provides a user-friendly interface for running local models.
 
-```bash
+### Setup
+
+1. **Start LM Studio** and load a model
+2. **Enable the local server** in settings
+3. **Configure Strix**:
+   ```bash
 export STRIX_LLM="openai/local-model"
-export LLM_API_BASE="http://localhost:1234/v1"  # Adjust port as needed
-```
+export LLM_API_BASE="http://localhost:1234/v1"  # LM Studio default
+   ```
+
+**Important**: LM Studio automatically handles most configuration, but ensure:
+- The loaded model supports tool use
+- Context window is set to at least 16k
+- Temperature is kept low (0.2-0.6)
 
 ### Gateways that require custom headers
 
@@ -72,6 +278,53 @@ For endpoints behind a private CA, point Strix at your certificate bundle with
 the standard `SSL_CERT_FILE=/path/to/ca-bundle.pem` — never disable TLS
 verification against a real endpoint.
 
+## Strix Configuration for Local Models
+
+### Environment Variables Reference
+
+| Variable | Purpose | Recommended Value | Required |
+|----------|---------|------------------|----------|
+| `STRIX_LLM` | Model identifier | `ollama/qwen3:70b` | ✅ Yes |
+| `LLM_API_BASE` | Server URL | `http://localhost:11434` | ✅ Yes |
+| `LLM_API_KEY` | API key (if required) | - | ❌ No |
+| `STRIX_REASONING_EFFORT` | Thinking effort | `medium` or `low` | ❌ No |
+| `LLM_TIMEOUT` | Request timeout (seconds) | `600` | ❌ No |
+| `LLM_STREAM_IDLE_TIMEOUT` | Stream idle timeout | `300-600` | ❌ No |
+| `LLM_DISABLE_STREAMING` | Disable streaming | `true` for problematic servers | ❌ No |
+| `STRIX_MAX_TURNS` | Maximum agent turns | `50-200` for local models | ❌ No |
+| `STRIX_CONTEXT_FALLBACK_TOKENS` | Fallback context | `65536` | ❌ No |
+| `STRIX_TOOL_OUTPUT_MAX_TOKENS` | Tool output cap | `4096` | ❌ No |
+
+### Optimized Configuration Examples
+
+**For Ollama with 70B model:**
+```bash
+export STRIX_LLM="ollama/qwen3:70b"
+export LLM_API_BASE="http://localhost:11434"
+export OLLAMA_NUM_CTX=32768
+export STRIX_REASONING_EFFORT="medium"
+export LLM_TIMEOUT=600
+export STRIX_MAX_TURNS=200
+```
+
+**For llama.cpp server:**
+```bash
+export STRIX_LLM="openai/qwen3-70b"
+export LLM_API_BASE="http://localhost:8080/v1"
+export LLM_TIMEOUT=600
+export STRIX_CONTEXT_FALLBACK_TOKENS=65536
+```
+
+**For small model testing:**
+```bash
+export STRIX_LLM="ollama/qwen3:32b"
+export LLM_API_BASE="http://localhost:11434"
+export OLLAMA_NUM_CTX=32768
+export STRIX_REASONING_EFFORT="low"
+export STRIX_MAX_TURNS=50
+export LLM_DISABLE_STREAMING=true  # Some small models struggle with streaming
+```
+
 ## Tool calling must return structured `tool_calls`
 
 Strix is entirely tool-driven: every working turn must be a **native** function/tool call. If your inference server returns the tool call as plain assistant text instead of a structured `tool_calls` field, Strix never sees a call it can execute, so the agent makes no real progress — it re-prompts the model for a tool call and gives up once its recovery attempts are exhausted.
@@ -86,23 +339,154 @@ exec_command(cmd="nmap ...", timeout=180)
 
 The fix belongs on the inference server: it must be configured to parse the model's tool tokens into structured `tool_calls`. A correctly configured endpoint either returns a structured call or rejects the request outright — it never leaks the call as text.
 
-### Fixes by server
+### Server-Specific Fixes
 
 **llama.cpp (`llama-server`)**
-- Run with `--jinja` and a correct tool-use chat template (`--chat-template` / `--chat-template-file` matching the model). Recent builds enable `--jinja` by default — **upgrade** if yours doesn't.
+- **REQUIRED**: Run with `--jinja` and a correct tool-use chat template (`--chat-template` / `--chat-template-file` matching the model). Recent builds enable `--jinja` by default — **upgrade** if yours doesn't.
 - For thinking models, align or disable reasoning (`--reasoning-format`, `-rea off`) so it doesn't break tool-call parsing.
 - A low temperature (e.g. `--temp 0.2`) improves tool-call reliability.
 
 **Ollama**
-- Use a recent Ollama and a model whose template wires tools. Modern Ollama refuses tools (`tools param requires --jinja flag`) if the template lacks tool support.
-- For reasoning models (e.g. qwen3), disable the model's **thinking** mode — thinking left on frequently pushes the tool call into the text `content` instead of the structured `tool_calls` field. Turn it off on the Ollama side (a non-thinking model variant, or `think: false` in the model's parameters / `Modelfile`).
-- Raise **`num_ctx`** to at least 16k–32k. Strix sends a large system prompt plus many tool schemas; at Ollama's small default context the tool definitions are truncated out of the prompt and the model stops emitting valid calls. A short test prompt can look fine while a real scan fails, so set this explicitly rather than inferring it from a quick check.
+- **REQUIRED**: Use a recent Ollama and a model whose template wires tools. Modern Ollama refuses tools (`tools param requires --jinja flag`) if the template lacks tool support.
+- **REQUIRED**: For reasoning models (e.g. qwen3), disable the model's **thinking** mode — thinking left on frequently pushes the tool call into the text `content` instead of the structured `tool_calls` field. Turn it off on the Ollama side (a non-thinking model variant, or `think: false` in the model's parameters / `Modelfile`).
+- **REQUIRED**: Raise **`num_ctx`** to at least 16k–32k. Strix sends a large system prompt plus many tool schemas; at Ollama's small default context the tool definitions are truncated out of the prompt and the model stops emitting valid calls. A short test prompt can look fine while a real scan fails, so set this explicitly rather than inferring it from a quick check.
 
 **vLLM**
 - Start with `--enable-auto-tool-choice`, a matching `--tool-call-parser` (`hermes`, `qwen3_xml`, or `llama3_json`), and a matching `--reasoning-parser` for reasoning models.
 
 A low sampling temperature (roughly 0.2–0.6, depending on the family) also measurably reduces malformed tool calls on open-weight models. Set it on the server or in your model's parameters.
 
+## Testing Your Setup
+
+### Quick Verification
+
+Before running a full scan, test your model with our test script:
+
+```bash
+# Test tool calling capability
+python scripts/test_local_model_tool_call.py --model "qwen3:70b" --api-base "http://localhost:11434"
+
+# For custom OpenAI-compatible server
+python scripts/test_local_model_tool_call.py --model "local-model" --api-base "http://localhost:8000/v1"
+```
+
+The script tests:
+- ✅ Structured tool call support
+- ✅ Context window capacity
+- ✅ Response format compatibility
+
+### Manual Test
+
+You can also manually test with curl:
+
+```bash
+curl -X POST "http://localhost:11434/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3:70b",
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant with access to tools."},
+      {"role": "user", "content": "What tools are available?"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "exec_command",
+        "description": "Execute a command",
+        "parameters": {
+          "type": "object",
+          "properties": {"cmd": {"type": "string"}}
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "temperature": 0.2
+  }'
+```
+
+**Look for**: The response should contain `"tool_calls": [...]` in the message, not tool calls as text content.
+
+## Common Issues and Solutions
+
+### Problem: Model returns tool calls as text
+**Symptoms**: Tool calls appear in response `content` field as text instead of structured `tool_calls`.
+**Solution**: Configure your inference server to parse tool calls (see server-specific fixes above).
+
+### Problem: Context window too small
+**Symptoms**: Model fails to emit tool calls, error messages about context length.
+**Solution**: Increase context window to 16k-32k tokens minimum.
+
+### Problem: Malformed tool call structure
+**Symptoms**: Tool calls missing required fields like `type`, `function`, or `name`.
+**Solution**: Lower temperature to 0.2-0.4, try different model, or fix server configuration.
+
+### Problem: "tools param requires --jinja flag"
+**Symptoms**: Ollama rejects requests with tools parameter.
+**Solution**: Upgrade Ollama to latest version or use a different inference server.
+
+### Problem: Streaming timeouts or inconsistencies
+**Symptoms**: Incomplete responses, streaming errors, or malformed chunks.
+**Solution**: Try `export LLM_DISABLE_STREAMING=true` to use non-streaming mode.
+
+### Problem: High error rates with small models
+**Symptoms**: Frequent tool call parsing errors, incorrect actions, or scan failures.
+**Solution**: Use larger models (70B+). Small models cannot reliably handle agentic tasks.
+
 <Warning>
-Even correctly configured, small models (< ~30B) emit malformed or text-form tool calls far more often than frontier models. Prefer a capable model for reliable agentic behavior.
+Even correctly configured, small models (< ~30B) emit malformed or text-form tool calls far more often than frontier models. Prefer a capable model (≥70B) for reliable agentic behavior with Strix.
 </Warning>
+
+## Performance Optimization
+
+### Hardware Requirements
+
+| Model Size | VRAM Required (4-bit) | System RAM | GPU Recommendation |
+|------------|----------------------|------------|-------------------|
+| 70B | 40-48GB | 16GB+ | RTX 4090, A100 |
+| 32B | 20-24GB | 16GB+ | RTX 4090, RTX 4080 |
+| 14B | 8-10GB | 8GB+ | RTX 3090, RTX 4070 |
+
+### Inference Server Optimization
+
+**Ollama:**
+```bash
+# Use GPU layers for faster inference
+export OLLAMA_MAX_LOADED_MODELS=1
+export OLLAMA_GPU_MEMORY_FRACTION=0.9
+export OLLAMA_LLM_LIBRARY=cuda
+```
+
+**llama.cpp:**
+```bash
+# Optimize for your hardware
+./llama-server \
+  --model model.gguf \
+  --ctx-size 32768 \
+  --temp 0.2 \
+  --n-gl 33 
+  --threads 8
+```
+
+**vLLM:**
+```bash
+# Use tensor parallelism
+vllm serve model \
+  --tensor-parallel-size 2 \
+  --max-model-len 32768 \
+  --dtype auto
+```
+
+## Hybrid Configuration
+
+For cost savings on deduplication while using cloud models for main scanning:
+
+```bash
+# Main scan with cloud model
+export STRIX_LLM="anthropic/claude-sonnet-4-6"
+
+# Deduplication with local model (saves cost)
+export STRIX_DEDUPE_MODEL="ollama/qwen3:70b"
+export DEDUPE_LLM_API_BASE="http://localhost:11434"
+```
+
+This uses the local model for finding duplicate vulnerabilities while the cloud model handles the complex pentesting logic.
